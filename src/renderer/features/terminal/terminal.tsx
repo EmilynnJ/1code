@@ -6,7 +6,7 @@ import type { SerializeAddon } from "@xterm/addon-serialize"
 import { useTheme } from "next-themes"
 import { useSetAtom, useAtomValue } from "jotai"
 import { trpc } from "@/lib/trpc"
-import { terminalCwdAtom } from "./atoms"
+import { terminalCwdAtom, terminalsAtom } from "./atoms"
 import { fullThemeDataAtom } from "@/lib/atoms"
 import {
   createTerminalInstance,
@@ -46,6 +46,7 @@ export function Terminal({
     initialCwd || cwd,
   )
   const setGlobalCwds = useSetAtom(terminalCwdAtom)
+  const setAllTerminals = useSetAtom(terminalsAtom)
 
   // Theme detection
   const { resolvedTheme } = useTheme()
@@ -70,6 +71,8 @@ export function Terminal({
   const clearScrollbackMutation = trpc.terminal.clearScrollback.useMutation()
 
   // Refs for mutations to avoid effect re-runs
+  const setAllTerminalsRef = useRef(setAllTerminals)
+  setAllTerminalsRef.current = setAllTerminals
   const createOrAttachRef = useRef(createOrAttachMutation.mutate)
   const writeRef = useRef(writeMutation.mutate)
   const resizeRef = useRef(resizeMutation.mutate)
@@ -221,7 +224,18 @@ export function Terminal({
       if (domEvent.key === "Enter") {
         const title = sanitizeForTitle(commandBufferRef.current)
         if (title) {
-          // TODO: Set tab title
+          setAllTerminalsRef.current((prev) => {
+            const next = { ...prev }
+            for (const [chatId, terminals] of Object.entries(next)) {
+              if (terminals.some((t) => t.paneId === paneIdRef.current)) {
+                next[chatId] = terminals.map((t) =>
+                  t.paneId === paneIdRef.current ? { ...t, name: title } : t,
+                )
+                break
+              }
+            }
+            return next
+          })
         }
         commandBufferRef.current = ""
       } else if (domEvent.key === "Backspace") {
