@@ -5,6 +5,8 @@
 
 import { PostHog } from "posthog-node"
 import { app } from "electron"
+import { existsSync, writeFileSync } from "fs"
+import { join } from "path"
 
 // PostHog configuration from environment
 const POSTHOG_DESKTOP_KEY = import.meta.env.MAIN_VITE_POSTHOG_KEY
@@ -157,8 +159,19 @@ export async function shutdown() {
  * Track app opened event
  */
 export function trackAppOpened() {
+  let isFirstLaunch = false
+  try {
+    const markerPath = join(app.getPath("userData"), ".first_launch_marker")
+    if (!existsSync(markerPath)) {
+      isFirstLaunch = true
+      writeFileSync(markerPath, "true", "utf8")
+    }
+  } catch (error) {
+    console.error("[Analytics] Error checking first launch:", error)
+  }
+
   capture("desktop_opened", {
-    first_launch: false, // TODO: track first launch
+    first_launch: isFirstLaunch,
   })
 }
 
