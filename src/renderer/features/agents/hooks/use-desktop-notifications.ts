@@ -1,13 +1,33 @@
-// Mock desktop notifications hook for desktop app
+// Desktop notifications hook for desktop app
 
 export function useDesktopNotifications() {
   return {
-    showNotification: (_title: string, _body: string) => {
-      // Desktop notification - TODO: implement real notifications
+    showNotification: (title: string, body: string) => {
+      if (typeof window !== "undefined" && window.desktopApi) {
+        window.desktopApi.showNotification({ title, body })
+      } else if (typeof window !== "undefined" && "Notification" in window) {
+        if (Notification.permission === "granted") {
+          new Notification(title, { body })
+        }
+      }
     },
-    notifyAgentComplete: (_chatName: string) => {
-      // Agent complete notification - TODO: implement real notifications
+    notifyAgentComplete: (chatName: string) => {
+      const title = "Agent Complete"
+      const body = chatName ? `Task completed in ${chatName}` : "Agent completed task"
+
+      if (typeof window !== "undefined" && window.desktopApi) {
+        window.desktopApi.showNotification({ title, body })
+      } else if (typeof window !== "undefined" && "Notification" in window) {
+        if (Notification.permission === "granted") {
+          new Notification(title, { body })
+        }
+      }
     },
-    requestPermission: () => Promise.resolve('granted' as NotificationPermission),
+    requestPermission: async () => {
+      if (typeof window !== "undefined" && "Notification" in window) {
+        return Notification.requestPermission()
+      }
+      return Promise.resolve("default" as NotificationPermission)
+    },
   }
 }
