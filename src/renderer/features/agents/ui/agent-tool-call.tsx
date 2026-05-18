@@ -1,5 +1,6 @@
 "use client"
 
+import DOMPurify from "dompurify"
 import { memo } from "react"
 import { TextShimmer } from "../../../components/ui/text-shimmer"
 import {
@@ -39,7 +40,7 @@ export const AgentToolCall = memo(
           <TooltipTrigger asChild>
             <span
               className="text-muted-foreground/60 font-normal truncate min-w-0"
-              dangerouslySetInnerHTML={{ __html: subtitleStr }}
+              dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(subtitleStr) }}
             />
           </TooltipTrigger>
           <TooltipContent
@@ -54,7 +55,7 @@ export const AgentToolCall = memo(
       ) : (
         <span
           className="text-muted-foreground/60 font-normal truncate min-w-0"
-          dangerouslySetInnerHTML={{ __html: subtitleStr }}
+          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(subtitleStr) }}
         />
       )
     ) : null
