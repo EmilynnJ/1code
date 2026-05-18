@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process"
+import { execSync, execFileSync } from "node:child_process"
 import os from "node:os"
 import pidtree from "pidtree"
 
@@ -54,10 +54,16 @@ function getListeningPortsLsof(pids: number[]): PortInfo[] {
 		// -n: don't resolve hostnames
 		// Note: lsof may ignore -p filter if PIDs don't exist or have no matches,
 		// so we must validate PIDs in the output against our requested set
-		const output = execSync(
-			`lsof -p ${pidArg} -iTCP -sTCP:LISTEN -P -n 2>/dev/null || true`,
-			{ encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 },
-		)
+		let output = ""
+		try {
+			output = execFileSync(
+				"lsof",
+				["-p", pidArg, "-iTCP", "-sTCP:LISTEN", "-P", "-n"],
+				{ encoding: "utf-8", maxBuffer: 10 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] },
+			)
+		} catch (e: any) {
+			output = e.stdout || ""
+		}
 
 		if (!output.trim()) return []
 
@@ -164,9 +170,10 @@ function getListeningPortsWindows(pids: number[]): PortInfo[] {
  */
 function getProcessNameWindows(pid: number): string {
 	try {
-		const output = execSync(
-			`wmic process where processid=${pid} get name 2>nul`,
-			{ encoding: "utf-8" },
+		const output = execFileSync(
+			"wmic",
+			["process", "where", `processid=${pid}`, "get", "name"],
+			{ encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] },
 		)
 		const lines = output.trim().split("\n")
 		if (lines.length >= 2) {
@@ -176,9 +183,10 @@ function getProcessNameWindows(pid: number): string {
 	} catch {
 		// wmic is deprecated, try PowerShell as fallback
 		try {
-			const output = execSync(
-				`powershell -Command "(Get-Process -Id ${pid}).ProcessName"`,
-				{ encoding: "utf-8" },
+			const output = execFileSync(
+				"powershell",
+				["-Command", `(Get-Process -Id ${pid}).ProcessName`],
+				{ encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] },
 			)
 			return output.trim() || "unknown"
 		} catch {
@@ -200,8 +208,9 @@ export function getProcessName(pid: number): string {
 
 	// macOS/Linux
 	try {
-		const output = execSync(`ps -p ${pid} -o comm= 2>/dev/null || true`, {
+		const output = execFileSync("ps", ["-p", pid.toString(), "-o", "comm="], {
 			encoding: "utf-8",
+			stdio: ["ignore", "pipe", "ignore"],
 		})
 		const name = output.trim()
 		// On macOS, comm may be truncated. The full path can be gotten with -o command=
