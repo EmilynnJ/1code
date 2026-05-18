@@ -18,6 +18,7 @@ export interface TerminalProps {
   tabId?: string
   initialCommands?: string[]
   initialCwd?: string
+  onTitleChange?: (title: string) => void
 }
 
 export interface TerminalStreamEvent {
