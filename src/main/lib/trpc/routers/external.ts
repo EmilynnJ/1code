@@ -54,7 +54,12 @@ export const externalRouter = router({
 		}),
 
 	openExternal: publicProcedure
-		.input(z.string())
+		.input(
+			z.string().url().refine(
+				(url) => url.startsWith('http://') || url.startsWith('https://'),
+				{ message: 'Only http and https protocols are allowed' }
+			)
+		)
 		.mutation(async ({ input: url }) => {
 			await shell.openExternal(url);
 			return { success: true };
