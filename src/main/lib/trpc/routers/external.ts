@@ -19,17 +19,29 @@ export const externalRouter = router({
 			z.object({
 				path: z.string(),
 				cwd: z.string().optional(),
+				line: z.number().optional(),
+				column: z.number().optional(),
 			}),
 		)
 		.mutation(async ({ input }) => {
-			const { path, cwd } = input;
+			const { path, cwd, line, column } = input;
+
+			// Construct path with line/column for editors that support it (VS Code/Cursor using -g or goto)
+			const hasLine = typeof line === "number";
+			const hasColumn = typeof column === "number";
+			const pathWithLineCol =
+				hasLine && hasColumn
+					? `${path}:${line}:${column}`
+					: hasLine
+						? `${path}:${line}`
+						: path;
 
 			// Try common code editors in order of preference
 			const editors = [
-				{ cmd: "code", args: [path] }, // VS Code
-				{ cmd: "cursor", args: [path] }, // Cursor
-				{ cmd: "subl", args: [path] }, // Sublime Text
-				{ cmd: "atom", args: [path] }, // Atom
+				{ cmd: "code", args: hasLine ? ["-g", pathWithLineCol] : [path] }, // VS Code
+				{ cmd: "cursor", args: hasLine ? ["-g", pathWithLineCol] : [path] }, // Cursor
+				{ cmd: "subl", args: hasLine ? [`${path}:${line}`] : [path] }, // Sublime Text (uses path:line format)
+				{ cmd: "atom", args: hasLine ? [`${path}:${line}`] : [path] }, // Atom (uses path:line format)
 				{ cmd: "open", args: ["-t", path] }, // macOS default text editor
 			];
 
