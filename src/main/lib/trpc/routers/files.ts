@@ -78,6 +78,7 @@ async function scanDirectory(
   if (depth > maxDepth) return []
 
   const entries: FileEntry[] = []
+  const subDirPromises: Promise<FileEntry[]>[] = []
 
   try {
     const dirEntries = await readdir(currentPath, { withFileTypes: true })
@@ -96,8 +97,7 @@ async function scanDirectory(
         entries.push({ path: relativePath, type: "folder" })
 
         // Recurse into subdirectory
-        const subEntries = await scanDirectory(rootPath, fullPath, depth + 1, maxDepth)
-        entries.push(...subEntries)
+        subDirPromises.push(scanDirectory(rootPath, fullPath, depth + 1, maxDepth))
       } else if (entry.isFile()) {
         // Skip ignored files
         if (IGNORED_FILES.has(entry.name)) continue
@@ -110,6 +110,13 @@ async function scanDirectory(
         }
 
         entries.push({ path: relativePath, type: "file" })
+      }
+    }
+
+    if (subDirPromises.length > 0) {
+      const subDirResults = await Promise.all(subDirPromises)
+      for (const subEntries of subDirResults) {
+        entries.push(...subEntries)
       }
     }
   } catch (error) {
