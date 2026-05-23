@@ -944,51 +944,50 @@ export const chatsRouter = router({
     for (const row of allSubChats) {
       if (!row.messages || !row.subChatId || !row.chatId) continue
 
-      try {
-        const messages = JSON.parse(row.messages) as Array<{
-          role: string
-          content?: string
-          parts?: Array<{
-            type: string
-            text?: string
+      // Fast path: string matching instead of JSON parsing
+      const lastExitPlanIdx = row.messages.lastIndexOf('"tool-ExitPlanMode"')
+      if (lastExitPlanIdx !== -1) {
+        try {
+          const messages = JSON.parse(row.messages) as Array<{
+            role: string
+            content?: string
+            parts?: Array<{
+              type: string
+              text?: string
+            }>
           }>
-        }>
 
-        // Traverse messages from end to find unapproved ExitPlanMode
-        // Logic matches active-chat.tsx hasUnapprovedPlan
-        let hasUnapprovedPlan = false
+          let hasUnapprovedPlan = false
+          for (let i = messages.length - 1; i >= 0; i--) {
+            const msg = messages[i]
+            if (!msg) continue
 
-        for (let i = messages.length - 1; i >= 0; i--) {
-          const msg = messages[i]
-          if (!msg) continue
+            if (msg.role === "user") {
+              const textPart = msg.parts?.find((p) => p.type === "text")
+              const text = textPart?.text || ""
+              if (text.trim().toLowerCase() === "implement plan") {
+                break
+              }
+            }
 
-          // If user message says "Implement plan" (exact match), plan is already approved
-          if (msg.role === "user") {
-            const textPart = msg.parts?.find((p) => p.type === "text")
-            const text = textPart?.text || ""
-            if (text.trim().toLowerCase() === "implement plan") {
-              break // Plan was approved, stop searching
+            if (msg.role === "assistant" && msg.parts) {
+              const exitPlanPart = msg.parts.find((p) => p.type === "tool-ExitPlanMode")
+              if (exitPlanPart) {
+                hasUnapprovedPlan = true
+                break
+              }
             }
           }
 
-          // If assistant message with ExitPlanMode, we found an unapproved plan
-          if (msg.role === "assistant" && msg.parts) {
-            const exitPlanPart = msg.parts.find((p) => p.type === "tool-ExitPlanMode")
-            if (exitPlanPart) {
-              hasUnapprovedPlan = true
-              break
-            }
+          if (hasUnapprovedPlan) {
+            pendingApprovals.push({
+              subChatId: row.subChatId,
+              chatId: row.chatId,
+            })
           }
+        } catch {
+          // Skip invalid JSON
         }
-
-        if (hasUnapprovedPlan) {
-          pendingApprovals.push({
-            subChatId: row.subChatId,
-            chatId: row.chatId,
-          })
-        }
-      } catch {
-        // Skip invalid JSON
       }
     }
 
