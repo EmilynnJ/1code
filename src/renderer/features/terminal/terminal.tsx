@@ -68,6 +68,7 @@ export function Terminal({
   const resizeMutation = trpc.terminal.resize.useMutation()
   const detachMutation = trpc.terminal.detach.useMutation()
   const clearScrollbackMutation = trpc.terminal.clearScrollback.useMutation()
+  const openInEditorMutation = trpc.external.openFileInEditor.useMutation()
 
   // Refs for mutations to avoid effect re-runs
   const createOrAttachRef = useRef(createOrAttachMutation.mutate)
@@ -75,11 +76,13 @@ export function Terminal({
   const resizeRef = useRef(resizeMutation.mutate)
   const detachRef = useRef(detachMutation.mutate)
   const clearScrollbackRef = useRef(clearScrollbackMutation.mutate)
+  const openInEditorRef = useRef(openInEditorMutation.mutate)
   createOrAttachRef.current = createOrAttachMutation.mutate
   writeRef.current = writeMutation.mutate
   resizeRef.current = resizeMutation.mutate
   detachRef.current = detachMutation.mutate
   clearScrollbackRef.current = clearScrollbackMutation.mutate
+  openInEditorRef.current = openInEditorMutation.mutate
 
   // Parse terminal data for cwd (OSC 7 sequences)
   const updateCwdFromData = useCallback(
@@ -153,7 +156,12 @@ export function Terminal({
         isDark,
         onFileLinkClick: (path, line, column) => {
           console.log("[Terminal] File link clicked:", path, line, column)
-          // TODO: Open file in editor
+          openInEditorRef.current({
+            path,
+            cwd: terminalCwdRef.current || cwd,
+            line,
+            column,
+          })
         },
         onUrlClick: (url) => {
           console.log("[Terminal] URL clicked:", url)
