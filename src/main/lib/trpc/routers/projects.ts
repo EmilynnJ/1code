@@ -4,14 +4,14 @@ import { getDatabase, projects } from "../../db"
 import { eq, desc } from "drizzle-orm"
 import { dialog, BrowserWindow, app } from "electron"
 import { basename, join } from "path"
-import { exec } from "node:child_process"
+import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { existsSync } from "node:fs"
 import { mkdir } from "node:fs/promises"
 import { getGitRemoteInfo } from "../../git"
 import { trackProjectOpened } from "../../analytics"
 
-const execAsync = promisify(exec)
+const execFileAsync = promisify(execFile)
 
 export const projectsRouter = router({
   /**
@@ -315,7 +315,7 @@ export const projectsRouter = router({
 
       // Clone the repo
       const cloneUrl = `https://github.com/${owner}/${repo}.git`
-      await execAsync(`git clone "${cloneUrl}" "${clonePath}"`)
+      await execFileAsync("git", ["clone", cloneUrl, clonePath])
 
       // Get git info and create project
       const db = getDatabase()
