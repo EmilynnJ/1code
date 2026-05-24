@@ -32,6 +32,7 @@ export function Terminal({
   tabId,
   initialCommands,
   initialCwd,
+  onTitleChange,
 }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const xtermRef = useRef<XTerm | null>(null)
@@ -68,6 +69,10 @@ export function Terminal({
   const resizeMutation = trpc.terminal.resize.useMutation()
   const detachMutation = trpc.terminal.detach.useMutation()
   const clearScrollbackMutation = trpc.terminal.clearScrollback.useMutation()
+
+  // Ref for onTitleChange
+  const onTitleChangeRef = useRef(onTitleChange)
+  onTitleChangeRef.current = onTitleChange
 
   // Refs for mutations to avoid effect re-runs
   const createOrAttachRef = useRef(createOrAttachMutation.mutate)
@@ -221,7 +226,7 @@ export function Terminal({
       if (domEvent.key === "Enter") {
         const title = sanitizeForTitle(commandBufferRef.current)
         if (title) {
-          // TODO: Set tab title
+          onTitleChangeRef.current?.(title)
         }
         commandBufferRef.current = ""
       } else if (domEvent.key === "Backspace") {

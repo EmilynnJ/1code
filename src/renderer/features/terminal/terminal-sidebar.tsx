@@ -416,6 +416,9 @@ export function TerminalSidebar({
                 tabId={tabId}
                 initialCommands={initialCommands}
                 initialCwd={cwd}
+                onTitleChange={(title) =>
+                  renameTerminal(activeTerminal.id, title)
+                }
               />
             </motion.div>
           ) : (
@@ -509,6 +512,9 @@ export function TerminalSidebar({
                 tabId={tabId}
                 initialCommands={initialCommands}
                 initialCwd={cwd}
+                onTitleChange={(title) =>
+                  renameTerminal(activeTerminal.id, title)
+                }
               />
             </motion.div>
           ) : (
