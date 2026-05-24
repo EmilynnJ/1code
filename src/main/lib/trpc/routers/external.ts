@@ -7,56 +7,63 @@ import { publicProcedure, router } from "../index";
  * External router for shell operations (open in finder, open in editor, etc.)
  */
 export const externalRouter = router({
-	openInFinder: publicProcedure
-		.input(z.string())
-		.mutation(async ({ input: path }) => {
-			shell.showItemInFolder(path);
-			return { success: true };
-		}),
+  openInFinder: publicProcedure
+    .input(z.string())
+    .mutation(async ({ input: path }) => {
+      shell.showItemInFolder(path);
+      return { success: true };
+    }),
 
-	openFileInEditor: publicProcedure
-		.input(
-			z.object({
-				path: z.string(),
-				cwd: z.string().optional(),
-			}),
-		)
-		.mutation(async ({ input }) => {
-			const { path, cwd } = input;
+  openFileInEditor: publicProcedure
+    .input(
+      z.object({
+        path: z.string(),
+        cwd: z.string().optional(),
+        line: z.number().optional(),
+        column: z.number().optional(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const { path, cwd, line, column } = input;
 
-			// Try common code editors in order of preference
-			const editors = [
-				{ cmd: "code", args: [path] }, // VS Code
-				{ cmd: "cursor", args: [path] }, // Cursor
-				{ cmd: "subl", args: [path] }, // Sublime Text
-				{ cmd: "atom", args: [path] }, // Atom
-				{ cmd: "open", args: ["-t", path] }, // macOS default text editor
-			];
+      const hasPosition = line !== undefined;
+      const positionStr = hasPosition
+        ? `${path}:${line}${column !== undefined ? `:${column}` : ""}`
+        : path;
 
-			for (const editor of editors) {
-				try {
-					const child = spawn(editor.cmd, editor.args, {
-						cwd: cwd || undefined,
-						detached: true,
-						stdio: "ignore",
-					});
-					child.unref();
-					return { success: true, editor: editor.cmd };
-				} catch {
-					// Try next editor
-					continue;
-				}
-			}
+      // Try common code editors in order of preference
+      const editors = [
+        { cmd: "code", args: hasPosition ? ["--goto", positionStr] : [path] }, // VS Code
+        { cmd: "cursor", args: hasPosition ? ["--goto", positionStr] : [path] }, // Cursor
+        { cmd: "subl", args: hasPosition ? [`${path}:${line}`] : [path] }, // Sublime Text
+        { cmd: "atom", args: hasPosition ? [`${path}:${line}`] : [path] }, // Atom
+        { cmd: "open", args: ["-t", path] }, // macOS default text editor doesn't support lines via args easily
+      ];
 
-			// Fallback: use shell.openPath which opens with default app
-			await shell.openPath(path);
-			return { success: true, editor: "default" };
-		}),
+      for (const editor of editors) {
+        try {
+          const child = spawn(editor.cmd, editor.args, {
+            cwd: cwd || undefined,
+            detached: true,
+            stdio: "ignore",
+          });
+          child.unref();
+          return { success: true, editor: editor.cmd };
+        } catch {
+          // Try next editor
+          continue;
+        }
+      }
 
-	openExternal: publicProcedure
-		.input(z.string())
-		.mutation(async ({ input: url }) => {
-			await shell.openExternal(url);
-			return { success: true };
-		}),
+      // Fallback: use shell.openPath which opens with default app
+      await shell.openPath(path);
+      return { success: true, editor: "default" };
+    }),
+
+  openExternal: publicProcedure
+    .input(z.string())
+    .mutation(async ({ input: url }) => {
+      await shell.openExternal(url);
+      return { success: true };
+    }),
 });
