@@ -18,6 +18,7 @@ import {
   trackPRCreated,
 } from "../../analytics"
 import { terminalManager } from "../../terminal/manager"
+import { LRUCache } from "lru-cache"
 
 // Fallback to truncated user message if AI generation fails
 function getFallbackName(userMessage: string): string {
@@ -27,6 +28,15 @@ function getFallbackName(userMessage: string): string {
   }
   return trimmed.substring(0, 25) + "..."
 }
+
+// In-memory cache for file stats to avoid parsing large JSON blobs on every request
+const fileStatsCache = new LRUCache<
+  string,
+  {
+    updatedAt: number
+    stats: { additions: number; deletions: number; fileCount: number }
+  }
+>({ max: 1000 })
 
 export const chatsRouter = router({
   /**
@@ -794,12 +804,12 @@ export const chatsRouter = router({
     const db = getDatabase()
     const openSubChatIdsSet = input?.openSubChatIds ? new Set(input.openSubChatIds) : null
 
-    // Get all non-archived chats with their sub-chats
-    const allChats = db
+    // Get all non-archived chats with their sub-chats metadata
+    const allChatsMeta = db
       .select({
         chatId: chats.id,
         subChatId: subChats.id,
-        messages: subChats.messages,
+        updatedAt: subChats.updatedAt,
       })
       .from(chats)
       .leftJoin(subChats, eq(subChats.chatId, chats.id))
@@ -808,101 +818,162 @@ export const chatsRouter = router({
       // Filter by open sub-chats if provided
       .filter(row => !openSubChatIdsSet || !row.subChatId || openSubChatIdsSet.has(row.subChatId))
 
-    // Aggregate stats per workspace (chatId)
+    // Find which sub-chats need their stats recalculated
+    const missingIds: string[] = []
+
+    for (const row of allChatsMeta) {
+      if (!row.subChatId) continue
+      const cached = fileStatsCache.get(row.subChatId)
+      const currentTs = row.updatedAt?.getTime() || 0
+      if (!cached || cached.updatedAt !== currentTs) {
+        missingIds.push(row.subChatId)
+      }
+    }
+
+    // Fetch and calculate stats for missing/outdated sub-chats
+    if (missingIds.length > 0) {
+      // Chunking if missingIds is too large could be considered, but SQLite handles
+      // 1000s in an IN clause fine. We fetch missing ones directly.
+      const chunks = []
+      const chunkSize = 500
+      for (let i = 0; i < missingIds.length; i += chunkSize) {
+        chunks.push(missingIds.slice(i, i + chunkSize))
+      }
+
+      for (const chunk of chunks) {
+        const missingChatsData = db
+          .select({
+            subChatId: subChats.id,
+            messages: subChats.messages,
+            updatedAt: subChats.updatedAt,
+          })
+          .from(subChats)
+          .where(inArray(subChats.id, chunk))
+          .all()
+
+        for (const row of missingChatsData) {
+          const currentTs = row.updatedAt?.getTime() || 0
+          if (!row.messages) {
+            fileStatsCache.set(row.subChatId, {
+              updatedAt: currentTs,
+              stats: { additions: 0, deletions: 0, fileCount: 0 },
+            })
+            continue
+          }
+
+          try {
+            const messages = JSON.parse(row.messages) as Array<{
+              role: string
+              parts?: Array<{
+                type: string
+                input?: {
+                  file_path?: string
+                  old_string?: string
+                  new_string?: string
+                  content?: string
+                }
+              }>
+            }>
+
+            // Track file states for this sub-chat
+            const fileStates = new Map<
+              string,
+              { originalContent: string | null; currentContent: string }
+            >()
+
+            for (const msg of messages) {
+              if (msg.role !== "assistant") continue
+              for (const part of msg.parts || []) {
+                if (part.type === "tool-Edit" || part.type === "tool-Write") {
+                  const filePath = part.input?.file_path
+                  if (!filePath) continue
+                  // Skip session files
+                  if (
+                    filePath.includes("claude-sessions") ||
+                    filePath.includes("Application Support")
+                  )
+                    continue
+
+                  const oldString = part.input?.old_string || ""
+                  const newString =
+                    part.input?.new_string || part.input?.content || ""
+
+                  const existing = fileStates.get(filePath)
+                  if (existing) {
+                    existing.currentContent = newString
+                  } else {
+                    fileStates.set(filePath, {
+                      originalContent: part.type === "tool-Write" ? null : oldString,
+                      currentContent: newString,
+                    })
+                  }
+                }
+              }
+            }
+
+            // Calculate stats for this sub-chat
+            let subChatAdditions = 0
+            let subChatDeletions = 0
+            let subChatFileCount = 0
+
+            for (const [, state] of fileStates) {
+              const original = state.originalContent || ""
+              if (original === state.currentContent) continue
+
+              const oldLines = original ? original.split("\n").length : 0
+              const newLines = state.currentContent
+                ? state.currentContent.split("\n").length
+                : 0
+
+              if (!original) {
+                // New file
+                subChatAdditions += newLines
+              } else {
+                subChatAdditions += newLines
+                subChatDeletions += oldLines
+              }
+              subChatFileCount += 1
+            }
+
+            fileStatsCache.set(row.subChatId, {
+              updatedAt: currentTs,
+              stats: {
+                additions: subChatAdditions,
+                deletions: subChatDeletions,
+                fileCount: subChatFileCount,
+              },
+            })
+          } catch {
+            // Skip invalid JSON and cache empty stats to avoid re-parsing
+            fileStatsCache.set(row.subChatId, {
+              updatedAt: currentTs,
+              stats: { additions: 0, deletions: 0, fileCount: 0 },
+            })
+          }
+        }
+      }
+    }
+
+    // Aggregate stats per workspace (chatId) using the cache
     const statsMap = new Map<
       string,
       { additions: number; deletions: number; fileCount: number }
     >()
 
-    for (const row of allChats) {
-      if (!row.messages || !row.chatId) continue
+    for (const row of allChatsMeta) {
+      if (!row.chatId || !row.subChatId) continue
 
-      try {
-        const messages = JSON.parse(row.messages) as Array<{
-          role: string
-          parts?: Array<{
-            type: string
-            input?: {
-              file_path?: string
-              old_string?: string
-              new_string?: string
-              content?: string
-            }
-          }>
-        }>
-
-        // Track file states for this sub-chat
-        const fileStates = new Map<
-          string,
-          { originalContent: string | null; currentContent: string }
-        >()
-
-        for (const msg of messages) {
-          if (msg.role !== "assistant") continue
-          for (const part of msg.parts || []) {
-            if (part.type === "tool-Edit" || part.type === "tool-Write") {
-              const filePath = part.input?.file_path
-              if (!filePath) continue
-              // Skip session files
-              if (
-                filePath.includes("claude-sessions") ||
-                filePath.includes("Application Support")
-              )
-                continue
-
-              const oldString = part.input?.old_string || ""
-              const newString =
-                part.input?.new_string || part.input?.content || ""
-
-              const existing = fileStates.get(filePath)
-              if (existing) {
-                existing.currentContent = newString
-              } else {
-                fileStates.set(filePath, {
-                  originalContent: part.type === "tool-Write" ? null : oldString,
-                  currentContent: newString,
-                })
-              }
-            }
-          }
-        }
-
-        // Calculate stats for this sub-chat and add to workspace total
-        let subChatAdditions = 0
-        let subChatDeletions = 0
-        let subChatFileCount = 0
-
-        for (const [, state] of fileStates) {
-          const original = state.originalContent || ""
-          if (original === state.currentContent) continue
-
-          const oldLines = original ? original.split("\n").length : 0
-          const newLines = state.currentContent
-            ? state.currentContent.split("\n").length
-            : 0
-
-          if (!original) {
-            // New file
-            subChatAdditions += newLines
-          } else {
-            subChatAdditions += newLines
-            subChatDeletions += oldLines
-          }
-          subChatFileCount += 1
-        }
-
-        // Add to workspace total
+      const cached = fileStatsCache.get(row.subChatId)
+      if (cached) {
         const existing = statsMap.get(row.chatId) || {
           additions: 0,
           deletions: 0,
           fileCount: 0,
         }
-        existing.additions += subChatAdditions
-        existing.deletions += subChatDeletions
-        existing.fileCount += subChatFileCount
+        existing.additions += cached.stats.additions
+        existing.deletions += cached.stats.deletions
+        existing.fileCount += cached.stats.fileCount
         statsMap.set(row.chatId, existing)
-      } catch {
-        // Skip invalid JSON
       }
     }
 
