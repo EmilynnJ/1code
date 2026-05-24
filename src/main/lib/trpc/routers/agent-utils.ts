@@ -228,17 +228,19 @@ export async function buildAgentsOption(
     { description: string; prompt: string; tools?: string[]; model?: AgentModel }
   > = {}
 
-  for (const name of agentNames) {
-    const agent = await loadAgent(name, cwd)
-    if (agent) {
-      agents[name] = {
-        description: agent.description,
-        prompt: agent.prompt,
-        ...(agent.tools && { tools: agent.tools }),
-        ...(agent.model && { model: agent.model }),
+  await Promise.all(
+    agentNames.map(async (name) => {
+      const agent = await loadAgent(name, cwd)
+      if (agent) {
+        agents[name] = {
+          description: agent.description,
+          prompt: agent.prompt,
+          ...(agent.tools && { tools: agent.tools }),
+          ...(agent.model && { model: agent.model }),
+        }
       }
-    }
-  }
+    })
+  )
 
   return agents
 }
